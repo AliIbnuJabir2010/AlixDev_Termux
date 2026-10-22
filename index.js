@@ -45,7 +45,7 @@ for (const fn of ['log', 'info', 'warn', 'error']) {
 // ---------- KONFIGURASI ----------
 const config = {
   botName: 'AlixDev',
-  version: '1.3.0',
+  version: '1.4.0',
   prefix: '.',
   watermark: 'Ali Ibnu Jabir',
   developer: 'Ali Ibnu Jabir',
@@ -260,6 +260,9 @@ async function start() {
 ;(async () => {
   checkCredit()
   await loadBaileys()
+  if (!require('./lib/brat').emojiReady) {
+    console.log('⚠️  Paket emoji belum ke-install, emoji di .brat/.iphone/.ustad dilewati. Jalankan: npm i')
+  }
   commands = createCommands({
     config,
     startedAt,

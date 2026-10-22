@@ -25,6 +25,6 @@ Catatan Termux:
 - Folder `session` jangan disalin antar perangkat. Login ulang di Termux; kalau dobel dipakai bisa logout.
 - Kalau muncul error `Bad MAC`: stop bot, `npm run reset-session`, lalu login ulang.
 
-Perintah: `.menu` `.info` `.dl <link>` `.dls <link>` `.rvo` `.s` `.brat <teks>`
+Perintah: `.menu` `.info` `.dl <link>` `.dls <link>` `.rvo` `.s` `.brat <teks>` `.iphone <teks>` `.ustad <kata>`
 
 Lisensi: lihat `LICENSE`. Dilarang edit/jual tanpa izin pemilik.
