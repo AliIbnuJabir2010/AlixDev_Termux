@@ -1,5 +1,16 @@
 # Changelog — AlixDev Bot © Ali Ibnu Jabir
 
+## v1.5.0 (Termux) — fitur disamakan lagi dengan versi PC (v1.9.5)
+- Baru: `.play <judul lagu / link youtube>` → cover + judul, lalu audionya (yt-dlp, maks 10 menit). `termux-setup.sh` sekarang ikut memasang yt-dlp & ffmpeg
+- Baru: `.toimg` → reply stiker jadi foto (latar transparan jadi putih, stiker animasi diambil frame pertama). Tanpa sharp, lewat @napi-rs/canvas
+- Baru: `.ig <teks>` → tampilan balas catatan Instagram (template assets/templates/ig.png). Tanpa sharp, blur dihitung manual (`blurRGBA`, paham transparansi)
+- Baru: `.owner` → foto + info singkat pemilik (assets/templates/owner.jpg, moto di config.ownerMotto)
+- Baru: `.off` / `.of` → matikan bot dari WhatsApp, khusus nomor owner terdaftar (config.owners / env OWNER_NUMBERS)
+- Error di chat tidak lagi menampilkan isi error mentah; detail cuma di terminal. Bot beri reaksi ❌ + pesan santai (lib/usererror.js)
+- Semua pesan bantuan & error disamakan jadi bahasa santai seperti versi PC
+- Fix .brat/.iphone/.ustad: emoji yang gambarnya nggak ketemu dibuang (nggak jadi kotak kosong)
+- Menu diperbarui (MAINMENU, DOWNLOADER, TOOLSMENU)
+
 ## v1.4.0 (Termux) — fitur disamakan dengan versi PC
 - Baru: `.iphone <teks> | <jam> | <tema>` → tampilan chat iPhone (reaksi + pesan + menu tahan-lama), tema terang/gelap
 - Baru: `.ustad <kata-kata>` → kotak "Soalan" di foto template (assets/templates/ustad.jpg)

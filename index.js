@@ -43,14 +43,22 @@ for (const fn of ['log', 'info', 'warn', 'error']) {
 }
 
 // ---------- KONFIGURASI ----------
+const OWNER_NUMBER = '08217017563'
 const config = {
   botName: 'AlixDev',
-  version: '1.4.0',
+  version: '1.5.0',
   prefix: '.',
   watermark: 'Ali Ibnu Jabir',
   developer: 'Ali Ibnu Jabir',
   github: '', // isi link GitHub kamu kalau mau tampil di .info
   menuImage: path.join(__dirname, 'assets', 'menu.jpg'),
+  // Nomor owner terdaftar (khusus perintah owner seperti .off).
+  // Format bebas: '628123456789' atau '0812-3456-789'. Bisa juga lewat env: OWNER_NUMBERS=628111,628222
+  owners: [OWNER_NUMBER, ...(process.env.OWNER_NUMBERS || '').split(',')],
+  // Info untuk perintah .owner (nama lengkap diambil dari developer). Moto kosong = barisnya disembunyikan.
+  ownerNumber: OWNER_NUMBER,
+  ownerMotto: '',
+  ownerImage: path.join(__dirname, 'assets', 'templates', 'owner.jpg'),
 }
 
 // ---------- PENGECEK KREDIT (integrity) ----------
@@ -97,6 +105,9 @@ function remember(m) {
 
 // ---------- DAFTAR PERINTAH (lihat commands.js) ----------
 const createCommands = require('./commands')
+const { createOwnerCheck } = require('./lib/owner')
+const { pesanGagal } = require('./lib/usererror')
+const isOwner = createOwnerCheck(config.owners)
 const startedAt = Date.now()
 let commands = null
 
@@ -242,10 +253,12 @@ async function start() {
           try {
             await commands[cmd](sock, msg, args)
           } catch (err) {
-            console.error(`Error .${cmd}:`, err.message)
+            // detail lengkap cuma di terminal; ke chat dikirim pesan ramah (tanpa path/isi error mentah)
+            console.error(`Error ${config.prefix}${cmd}:`, err)
+            sock.sendMessage(msg.key.remoteJid, { react: { text: '❌', key: msg.key } }).catch(() => {})
             await sock.sendMessage(
               msg.key.remoteJid,
-              { text: `Yah, ${config.prefix}${cmd} gagal nih: ${err.message}\n\n© ${config.watermark}` },
+              { text: `${pesanGagal(err, config.prefix + cmd)}\n\n© ${config.watermark}` },
               { quoted: msg }
             )
           }
@@ -263,15 +276,22 @@ async function start() {
   if (!require('./lib/brat').emojiReady) {
     console.log('⚠️  Paket emoji belum ke-install, emoji di .brat/.iphone/.ustad dilewati. Jalankan: npm i')
   }
-  commands = createCommands({
+  const bot = createCommands({
     config,
     startedAt,
+    isOwner,
+    // matikan bot dari WhatsApp (.off); jeda sebentar supaya balasan sempat terkirim
+    shutdown: () => {
+      console.log(`🔌 Bot dimatikan lewat WhatsApp (.off) | © ${config.watermark}`)
+      setTimeout(() => process.exit(0), 1500)
+    },
     downloadMedia: (sock, holder) =>
       downloadMediaMessage(holder, 'buffer', {}, {
         logger: pino({ level: 'silent' }),
         reuploadRequest: sock.updateMediaMessage,
       }),
   })
+  commands = bot.commands
   await welcome()
   await start()
 })()

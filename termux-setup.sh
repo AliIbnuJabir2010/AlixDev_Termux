@@ -14,6 +14,9 @@ if [ "$(uname -m)" != "aarch64" ]; then
   echo "   fitur .brat dan .s kemungkinan gagal. Perintah lain tetap bisa jalan."
 fi
 
+echo "==> Pasang yt-dlp & ffmpeg (khusus perintah .play)"
+pkg install -y yt-dlp ffmpeg || echo "!! yt-dlp/ffmpeg gagal dipasang, .play nggak akan jalan. Perintah lain tetap bisa. Coba manual: pkg install yt-dlp ffmpeg"
+
 echo "==> Pasang dependensi bot (emoji Apple ±100MB, sabar ya)"
 npm install --no-audit --no-fund
 

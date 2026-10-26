@@ -7,10 +7,14 @@
 
 const fs = require('fs')
 const os = require('os')
+const { createCanvas, loadImage } = require('@napi-rs/canvas')
 const { makeSticker } = require('./lib/sticker')
 const { makeBrat } = require('./lib/brat')
 const { renderIphoneChat } = require('./lib/iphonechat')
 const { renderUstad } = require('./lib/ustad')
+const { renderIg, igName } = require('./lib/ig')
+const { UserError } = require('./lib/usererror')
+const { searchSong, fetchAudio, fmtDuration, MAX_SECONDS } = require('./lib/play')
 
 const TIKTOK_RE = /https?:\/\/(?:[\w-]+\.)?tiktok\.com\/\S+/i
 const UA = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36' }
@@ -96,7 +100,7 @@ const box = (title, items) =>
   items.map((it, i) => `${items.length === 1 ? '└' : i === 0 ? '┌' : i === items.length - 1 ? '└' : '│'} ◦ ${it}`).join('\n')
 
 // ---------- FABRIK PERINTAH ----------
-module.exports = function createCommands({ config, downloadMedia, fetchFn = fetch, startedAt = Date.now() }) {
+module.exports = function createCommands({ config, downloadMedia, fetchFn = fetch, startedAt = Date.now(), isOwner = () => false, shutdown = () => process.exit(0) }) {
   const wm = `© ${config.watermark}`
   const p = config.prefix
 
@@ -108,7 +112,7 @@ module.exports = function createCommands({ config, downloadMedia, fetchFn = fetc
   async function tiktok(url) {
     const res = await fetchFn('https://www.tikwm.com/api/?hd=1&url=' + encodeURIComponent(url), { headers: UA })
     const json = await res.json()
-    if (json.code !== 0 || !json.data) throw new Error(json.msg || 'Video tidak ditemukan')
+    if (json.code !== 0 || !json.data) throw new UserError('Videonya gak ketemu bro, cek lagi linknya ya')
     const abs = (u) => (u ? (u.startsWith('http') ? u : 'https://www.tikwm.com' + u) : null)
     return {
       video: abs(json.data.hdplay || json.data.play),
@@ -120,7 +124,10 @@ module.exports = function createCommands({ config, downloadMedia, fetchFn = fetc
 
   async function getBuffer(url) {
     const res = await fetchFn(url, { headers: UA })
-    if (!res.ok) throw new Error('Gagal download filenya (HTTP ' + res.status + ')')
+    if (!res.ok) {
+      console.error('[download] HTTP', res.status, url)
+      throw new UserError('Yah gagal download filenya, coba lagi bentar ya')
+    }
     return Buffer.from(await res.arrayBuffer())
   }
 
@@ -137,9 +144,9 @@ module.exports = function createCommands({ config, downloadMedia, fetchFn = fetc
         `Woy ${nama}, selamat ${sapaan} 👋 mau ngapain nih?\n\n` +
         `◦ Mode : Public\n` +
         `◦ Dev : ${config.developer}\n\n` +
-        box('MAINMENU', [`${p}menu`, `${p}info`]) + '\n\n' +
-        box('DOWNLOADER', [`${p}dl <link tiktok>`, `${p}dls <link tiktok>`]) + '\n\n' +
-        box('TOOLSMENU', [`${p}rvo`, `${p}s`, `${p}brat <teks>`, `${p}iphone <teks>`, `${p}ustad <kata>`]) + '\n\n' +
+        box('MAINMENU', [`${p}menu`, `${p}info`, `${p}owner`]) + '\n\n' +
+        box('DOWNLOADER', [`${p}play <judul lagu>`, `${p}dl <link tiktok>`, `${p}dls <link tiktok>`]) + '\n\n' +
+        box('TOOLSMENU', [`${p}rvo`, `${p}s`, `${p}toimg`, `${p}brat <teks>`, `${p}iphone <teks>`, `${p}ustad <kata>`, `${p}ig <teks>`]) + '\n\n' +
         wm
 
       if (fs.existsSync(config.menuImage)) {
@@ -171,14 +178,40 @@ module.exports = function createCommands({ config, downloadMedia, fetchFn = fetc
       await reply(sock, msg, { text })
     },
 
+    // ===== .play <judul lagu / link youtube> → cover + judul, lalu musiknya =====
+    play: async (sock, msg, args) => {
+      const query = args.join(' ').trim().slice(0, 150)
+      if (!query) return reply(sock, msg, { text: `Eh bro, lagunya apa nih? Contoh:\n${p}play nadin amizah bertaut\n\n${wm}` })
+
+      await react(sock, msg, '⏳')
+      const song = await searchSong(query)
+      if (song.duration > MAX_SECONDS) {
+        throw new UserError(`Lagunya kepanjangan bro (${fmtDuration(song.duration)}), maksimal ${Math.floor(MAX_SECONDS / 60)} menit ya`)
+      }
+
+      const caption =
+        `Judul : ${song.title}\n` +
+        `Durasi : ${song.duration ? fmtDuration(song.duration) : '-'}\n\n${wm}`
+
+      // cover dulu (kalau gagal diambil, kirim teksnya saja)
+      let cover = null
+      try { cover = await getBuffer(`https://i.ytimg.com/vi/${song.id}/hqdefault.jpg`) } catch {}
+      if (cover) await reply(sock, msg, { image: cover, caption })
+      else await reply(sock, msg, { text: caption })
+
+      const { buffer, mimetype } = await fetchAudio(song.id)
+      await reply(sock, msg, { audio: buffer, mimetype })
+      await react(sock, msg, '✅')
+    },
+
     // ===== .dl <link tiktok> → video =====
     dl: async (sock, msg, args) => {
       const url = extractUrl(args)
-      if (!url) return reply(sock, msg, { text: `Link tiktoknya mana bro? Contoh:\n${p}dl https://vt.tiktok.com/xxxx\n\n${wm}` })
+      if (!url) return reply(sock, msg, { text: `Woy, link tiktoknya mana bro? Contoh:\n${p}dl https://vt.tiktok.com/xxxx\n\n${wm}` })
 
       await react(sock, msg, '⏳')
       const { video, title, likes } = await tiktok(url)
-      if (!video) throw new Error('Ini bukan video, kayaknya slideshow foto')
+      if (!video) throw new UserError('Ini bukan video bro, kayaknya slideshow foto')
       const buffer = await getBuffer(video)
       const cap = (title.length > 900 ? title.slice(0, 900) + '...' : title) || '-'
       const caption = `Caption : ${cap}\nLike : ${likes.toLocaleString('id-ID')}\n\n${wm}`
@@ -189,11 +222,11 @@ module.exports = function createCommands({ config, downloadMedia, fetchFn = fetc
     // ===== .dls <link tiktok> → audio =====
     dls: async (sock, msg, args) => {
       const url = extractUrl(args)
-      if (!url) return reply(sock, msg, { text: `Link tiktoknya mana bro? Contoh:\n${p}dls https://vt.tiktok.com/xxxx\n\n${wm}` })
+      if (!url) return reply(sock, msg, { text: `Woy, link tiktoknya mana bro? Contoh:\n${p}dls https://vt.tiktok.com/xxxx\n\n${wm}` })
 
       await react(sock, msg, '⏳')
       const { audio } = await tiktok(url)
-      if (!audio) throw new Error('Audionya gak ketemu')
+      if (!audio) throw new UserError('Audionya gak ketemu bro')
       const buffer = await getBuffer(audio)
       await reply(sock, msg, { audio: buffer, mimetype: 'audio/mpeg' })
       await react(sock, msg, '✅')
@@ -202,8 +235,8 @@ module.exports = function createCommands({ config, downloadMedia, fetchFn = fetc
     // ===== .rvo → buka sekali lihat (reply pesannya) =====
     rvo: async (sock, msg) => {
       const media = pickMedia(msg, ['imageMessage', 'videoMessage', 'audioMessage'])
-      if (!media) return reply(sock, msg, { text: `Reply dulu foto/video sekali lihatnya pake ${p}rvo\n\n${wm}` })
-      if (!media.viewOnce) return reply(sock, msg, { text: `Itu bukan pesan sekali lihat bro\n\n${wm}` })
+      if (!media) return reply(sock, msg, { text: `Eh reply dulu foto/video sekali lihatnya pake ${p}rvo\n\n${wm}` })
+      if (!media.viewOnce) return reply(sock, msg, { text: `Eh itu bukan pesan sekali lihat bro\n\n${wm}` })
 
       await react(sock, msg, '⏳')
       const buffer = await downloadMedia(sock, media.holder)
@@ -221,7 +254,7 @@ module.exports = function createCommands({ config, downloadMedia, fetchFn = fetc
     // ===== .s → foto jadi stiker =====
     s: async (sock, msg) => {
       const media = pickMedia(msg, ['imageMessage'])
-      if (!media) return reply(sock, msg, { text: `Kirim foto pake caption ${p}s, atau reply fotonya pake ${p}s\n\n${wm}` })
+      if (!media) return reply(sock, msg, { text: `Eh kirim foto pake caption ${p}s, atau reply fotonya pake ${p}s ya\n\n${wm}` })
 
       await react(sock, msg, '⏳')
       const buffer = await downloadMedia(sock, media.holder)
@@ -238,7 +271,7 @@ module.exports = function createCommands({ config, downloadMedia, fetchFn = fetc
         const qc = q && unwrap(q).content
         text = (qc?.conversation || qc?.extendedTextMessage?.text || '').trim()
       }
-      if (!text) return reply(sock, msg, { text: `Tulis teksnya dong, contoh:\n${p}brat aku capek banget\n\n${wm}` })
+      if (!text) return reply(sock, msg, { text: `Eh tulis teksnya dong bro Contoh:\n${p}brat aku capek banget\n\n${wm}` })
 
       await react(sock, msg, '⏳')
       const png = await makeBrat(text)
@@ -249,6 +282,30 @@ module.exports = function createCommands({ config, downloadMedia, fetchFn = fetc
   }
 
 
+  // ===== .toimg → stiker jadi foto (reply stikernya) =====
+  commands.toimg = async (sock, msg) => {
+    const media = pickMedia(msg, ['stickerMessage'])
+    if (!media) return reply(sock, msg, { text: `Eh reply stikernya pake ${p}toimg ya\n\n${wm}` })
+
+    await react(sock, msg, '⏳')
+    const buffer = await downloadMedia(sock, media.holder)
+
+    // Latar transparan diberi warna putih (kalau tidak, di WA jadi hitam).
+    // Stiker animasi: yang diambil frame pertamanya.
+    // Versi Termux: tanpa sharp, digambar ulang lewat @napi-rs/canvas.
+    const img = await loadImage(buffer)
+    const canvas = createCanvas(img.width, img.height)
+    const cx = canvas.getContext('2d')
+    cx.fillStyle = '#FFFFFF'
+    cx.fillRect(0, 0, img.width, img.height)
+    cx.drawImage(img, 0, 0)
+    const image = canvas.toBuffer('image/png')
+
+    const note = media.node.isAnimated ? 'Stikernya animasi, jadi yang diambil frame pertama aja ya.\n\n' : ''
+    await reply(sock, msg, { image, caption: `${note}${wm}` })
+    await react(sock, msg, '✅')
+  }
+
   // ===== .iphone <teks> | <jam> → tampilan chat iPhone dengan teks bebas =====
   commands.iphone = async (sock, msg, args) => {
     let raw = args.join(' ').trim()
@@ -258,7 +315,7 @@ module.exports = function createCommands({ config, downloadMedia, fetchFn = fetc
       raw = (qc?.conversation || qc?.extendedTextMessage?.text || '').trim()
     }
     if (!raw) {
-      return reply(sock, msg, { text: `Tulis teksnya dong, contoh:\n${p}iphone trend wut wut wut\n${p}iphone teksnya | 12.29  (jam bebas)\n${p}iphone teksnya | gelap  (tema gelap)\n\n${wm}` })
+      return reply(sock, msg, { text: `Eh tulis teksnya dong bro Contoh:\n${p}iphone trend wut wut wut\n${p}iphone teksnya | 12.29  (jam bebas)\n${p}iphone teksnya | gelap  (tema gelap)\n\n${wm}` })
     }
 
     // format: teks | jam | tema   (jam dan tema boleh dibalik / dilewati)
@@ -285,7 +342,7 @@ module.exports = function createCommands({ config, downloadMedia, fetchFn = fetc
       const qc = q && unwrap(q).content
       teks = (qc?.conversation || qc?.extendedTextMessage?.text || '').trim()
     }
-    if (!teks) return reply(sock, msg, { text: `Tulis kata-katanya dong, contoh:\n${p}ustad kenapa kucing suka masuk kardus?\n\n${wm}` })
+    if (!teks) return reply(sock, msg, { text: `Eh tulis kata-katanya dong bro Contoh:\n${p}ustad kenapa kucing suka masuk kardus?\n\n${wm}` })
 
     await react(sock, msg, '⏳')
     const image = await renderUstad(teks)
@@ -293,7 +350,59 @@ module.exports = function createCommands({ config, downloadMedia, fetchFn = fetc
     await react(sock, msg, '✅')
   }
 
-  return commands
+  // ===== .ig <teks> → balasan catatan Instagram: nama = pengirim, teks catatan bebas =====
+  commands.ig = async (sock, msg, args) => {
+    let teks = args.join(' ').trim()
+    if (!teks) {
+      const q = getContext(msg.message)?.quotedMessage
+      const qc = q && unwrap(q).content
+      teks = (qc?.conversation || qc?.extendedTextMessage?.text || '').trim()
+    }
+    if (!teks) return reply(sock, msg, { text: `Eh tulis teks catatannya dong bro Contoh:\n${p}ig penjahatnya disini sayang\n\n${wm}` })
+
+    await react(sock, msg, '⏳')
+    const image = await renderIg({ name: igName(msg.pushName), text: teks })
+    await reply(sock, msg, { image, caption: wm })
+    await react(sock, msg, '✅')
+  }
+
+  // ===== .owner → foto + info singkat pemilik bot =====
+  commands.owner = async (sock, msg) => {
+    const num = String(config.ownerNumber || '').replace(/\D/g, '').replace(/^0/, '62')
+    const rows = [`Nama : ${config.developer}`]
+    if (config.ownerMotto) rows.push(`Moto : ${config.ownerMotto}`)
+    rows.push(`Nomor : wa.me/${num}`)
+    const caption = box('OWNER', rows) + `\n\n${wm}`
+
+    if (config.ownerImage && fs.existsSync(config.ownerImage)) {
+      await reply(sock, msg, { image: fs.readFileSync(config.ownerImage), caption })
+    } else {
+      await reply(sock, msg, { text: caption })
+    }
+  }
+
+  // ===== .off → matikan bot dari WA (khusus nomor owner terdaftar) =====
+  // Alur: "Memverifikasi..." → pesan itu diedit jadi berhasil/gagal (kalau edit gagal, dikirim sebagai pesan baru)
+  commands.off = async (sock, msg) => {
+    const jid = msg.key.remoteJid
+    const sent = await sock.sendMessage(jid, { text: 'Memverifikasi...' }, { quoted: msg })
+    await new Promise((r) => setTimeout(r, 800))
+
+    const ok = isOwner(msg, sock.user?.id)
+    if (!ok) console.log(`⛔ ${p}off ditolak dari ${msg.key.participant || msg.key.remoteJid}`)
+    const text = ok ? 'Verifikasi berhasil' : 'Verifikasi gagal'
+
+    try {
+      if (!sent?.key) throw new Error('no key')
+      await sock.sendMessage(jid, { text, edit: sent.key })
+    } catch {
+      await reply(sock, msg, { text })
+    }
+    if (ok) shutdown()
+  }
+  commands.of = commands.off // alias kalau kepencet kurang satu f
+
+  return { commands }
 }
 
 module.exports._internal = { unwrap, findMedia, pickMedia, getContext, formatUptime }

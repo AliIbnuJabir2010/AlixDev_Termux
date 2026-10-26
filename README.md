@@ -25,6 +25,14 @@ Catatan Termux:
 - Folder `session` jangan disalin antar perangkat. Login ulang di Termux; kalau dobel dipakai bisa logout.
 - Kalau muncul error `Bad MAC`: stop bot, `npm run reset-session`, lalu login ulang.
 
-Perintah: `.menu` `.info` `.dl <link>` `.dls <link>` `.rvo` `.s` `.brat <teks>` `.iphone <teks>` `.ustad <kata>`
+Perintah: `.menu` `.info` `.owner` `.play <judul lagu>` `.dl <link>` `.dls <link>` `.rvo` `.s` `.toimg` `.brat <teks>` `.iphone <teks> | <jam>` `.ustad <kata>` `.ig <teks>`
+Khusus owner: `.off` / `.of` (matikan bot dari WA, balasan "Memverifikasi..." lalu diedit jadi berhasil/gagal)
+
+## .play (Termux)
+Butuh `yt-dlp` dan `ffmpeg` (dipasang otomatis oleh `termux-setup.sh`). Cek: `yt-dlp --version`. Kalau gagal terpasang: `pkg install yt-dlp ffmpeg`.
+Opsional (variabel lingkungan): `YTDLP_PATH`, `YTDLP_COOKIES`, `PLAY_MAX_SECONDS`.
+
+## Owner (.off)
+Isi nomor owner di `OWNER_NUMBER` (index.js), atau lewat env `OWNER_NUMBERS=628111,628222`. Di Termux tidak ada pm2, jadi setelah `.off` bot benar-benar berhenti; nyalakan lagi dengan `npm start`.
 
 Lisensi: lihat `LICENSE`. Dilarang edit/jual tanpa izin pemilik.
